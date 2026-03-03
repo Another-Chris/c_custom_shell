@@ -63,8 +63,8 @@ void move_cursor_left() {
   fflush(stdout);
 }
 void clear_line_and_reposition() {
-  printf("\x1b[2K");
-  printf("\x1b[0G");
+  printf("\x1b[2K"); // clear line
+  printf("\x1b[0G"); // move to column 0
   fflush(stdout);
 }
 
@@ -100,10 +100,91 @@ void delete_character_before_cursor(LineEditBuffer* buf) {
   buf->buffer[buf->input_len] = '\0';
 }
 
+void redraw_line(LineEditBuffer* buf) {
+  clear_line_and_reposition();
+  printf("%s", SHELL_PROMPT);
+  printf("%s", buf->buffer);
+  int prompt_len = strlen(SHELL_PROMPT);
+  int target_col = prompt_len + buf->cursor_pos;
+  // move cursor to the currect position
+  printf("\x1b[%dG", target_col);
+  move_cursor_right();
+  fflush(stdout);
+}
 
+int handle_escape_sequence(LineEditBuffer* buf) {
+  unsigned char seq[2];
+  if (read(STDIN_FILENO, seq, 2) == -1) {
+    return 0;
+  }
 
+  if (seq[0] == '[') {
+    switch (seq[1]) {
+      case 'A': // up
+        return 1;
+      case 'B': // down
+        return 1;
+      case 'C': // right
+        if (buf->cursor_pos < buf->input_len) {
+          buf->cursor_pos++;
+          move_cursor_right();
+        }
+        return 1;
+      case 'D':
+        if (buf->cursor_pos > 0) {
+          buf->cursor_pos--;
+          move_cursor_left();
+        }
+        return 1;
+      default:
+        return 0;
+      }
+  }
+  return 0;
+}
 
+void read_line_raw(const char* prompt, char **input) {
+  LineEditBuffer buf;
+  init_line_buffer(&buf); // init the structure
 
+  while(1) {
+    unsigned char ch;
+    if (read(STDIN_FILENO, &ch, 1) == -1) {
+      perror("read() failed");
+      break;
+    }
+
+    if (ch == '\n' || ch == '\r') {
+      printf("\n");
+      break;
+    }
+
+    // 127 DEL character
+    else if (ch == 127 || ch == '\b') {
+      delete_character_before_cursor(&buf);
+      redraw_line(&buf);
+    }
+
+    // 27 escape character
+    else if (ch == 27) {
+      handle_escape_sequence(&buf);
+    }
+
+    // Ctrl + C
+    else if (ch == 3) {
+
+    }
+
+    // printable ASCII character
+    else if (ch >= 32 && ch < 127) {
+      insert_character(&buf, ch);
+      redraw_line(&buf);
+    }
+  }
+
+  *input = (char*)malloc(buf.input_len+1);
+  strcpy(*input, buf.buffer);
+}
 
 
 void signal_handler(int sig) {
@@ -117,6 +198,7 @@ void signal_handler(int sig) {
 
 void shell_output(const char* str) {
   printf("%s", str);
+  fflush(stdout);
 }
 
 
@@ -229,16 +311,14 @@ void free_pipeline(Pipeline* pipeline) {
 
 int main() {
   signal(SIGINT, signal_handler);
+  enable_raw_mode();
+  atexit(disable_raw_mode);
   while(running) {
     shell_output(SHELL_PROMPT);
     fflush(stdout);
-    char* input = (char*)malloc(MAX_INPUT_SIZE);
 
-    if (fgets(input, MAX_INPUT_SIZE, stdin) == NULL) {
-      shell_output("\nExit\n");
-      free(input);
-      break;
-    }
+    char* input = NULL;
+    read_line_raw(SHELL_PROMPT,&input);
 
     size_t input_len = strlen(input);
     if (input_len > 0 && input[input_len - 1] == '\n') {

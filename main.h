@@ -46,10 +46,12 @@ void move_cursor_up();
 void move_cursor_right();
 void move_cursor_down();
 void clear_line_and_reposition();
-
 void init_line_buffer(LineEditBuffer *buf);
 void insert_character(LineEditBuffer *buf, char ch);
 void delete_character_before_cursor(LineEditBuffer *buf);
+void redraw_line(LineEditBuffer *buf); // redraw the line after change
+int handle_escape_sequence(LineEditBuffer* buf);
+void read_line_raw(const char *prompt, char **input); //read the entire line
 
 
 
